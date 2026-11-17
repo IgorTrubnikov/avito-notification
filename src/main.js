@@ -6,13 +6,14 @@ import { Store } from './store.js';
 import { sendTelegram, deliver } from './telegram.js';
 import { telegramTransport } from './telegram-proxy.js';
 import { unreadCount, openMessenger } from './avito.js';
+import { freshMessengerTab, retryDelay } from './recovery.js';
 
 process.umask(0o077);
 const mode = process.argv[2] || 'monitor';
 const data = process.env.DATA_DIR || '/data';
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const chat = process.env.TELEGRAM_CHAT_ID;
-const seconds = Number(process.env.POLL_SECONDS || 30);
+const seconds = Number(process.env.POLL_SECONDS || 120);
 const monitorHeadless = process.env.MONITOR_HEADLESS || 'true';
 if (!['true', 'false'].includes(monitorHeadless)) throw new Error('MONITOR_HEADLESS must be true or false');
 if (!['monitor', 'login', 'telegram-test'].includes(mode)) throw new Error('Unknown command');
@@ -43,9 +44,9 @@ if (mode === 'telegram-test') {
       headless: mode !== 'login' && monitorHeadless === 'true', viewport: { width: 1280, height: 800 },
       args: ['--disable-dev-shm-usage'], timeout: 60000
     });
-    const page = context.pages()[0] || await context.newPage();
+    let page = context.pages()[0] || await context.newPage();
     for (const extra of context.pages().filter(p => p !== page)) await extra.close();
-    page.setDefaultTimeout(25000);
+    context.setDefaultTimeout(25000);
     try {
       await openMessenger(page, { log });
     } catch (error) {
@@ -67,7 +68,8 @@ if (mode === 'telegram-test') {
         try {
           if (page.isClosed()) throw new Error('Browser page closed');
           if (recoveryNeeded) {
-            log('Reloading messenger before retry');
+            log('Replacing messenger tab before retry');
+            page = await freshMessengerTab(context, page);
             await openMessenger(page, { log });
             recoveryNeeded = false;
           }
@@ -94,12 +96,12 @@ if (mode === 'telegram-test') {
             store.enqueue('⚠️ Более 5 минут не удаётся проверить Авито. Возможны проблемы сети, проверка Авито или истёкшая сессия. Проверьте логи и при необходимости войдите заново.');
             store.set('unhealthy', '1');
           }
-          delay = Math.min(300000, seconds * 1000 * 2 ** Math.min(failures, 4));
+          delay = retryDelay(error, failures, seconds * 1000);
 
         }
         try { await deliver(store, send); }
         catch (error) { log(error.message); delay = Math.max(delay, (error.retryAfter || 0) * 1000); }
-        if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will reload before retry`);
+        if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will open in a fresh tab before retry`);
         await sleep(delay, undefined, { signal: controller.signal }).catch(() => {});
       }
     }
