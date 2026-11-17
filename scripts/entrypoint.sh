@@ -4,6 +4,21 @@ mkdir -p /data
 # Prevent simultaneous Chromium instances and counter writers on the same volume.
 exec 9>/data/service.lock
 flock -n 9 || { echo 'Profile is in use. Stop the login/monitor service first.'; exit 1; }
+# The flock is shared by login and monitor; only its owner may clean Chromium's
+# symlinks, which can retain the previous container's hostname after shutdown.
+case "${1:-monitor}" in
+  login|monitor)
+    for name in SingletonLock SingletonCookie SingletonSocket; do
+      path="/data/profile/$name"
+      if [ -L "$path" ]; then
+        rm -- "$path"
+      elif [ -e "$path" ]; then
+        echo "Unexpected Chromium lock file; refusing to remove: $name"
+        exit 1
+      fi
+    done
+    ;;
+esac
 if [ "${1:-}" = login ]; then
   export DISPLAY=:99
   Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
