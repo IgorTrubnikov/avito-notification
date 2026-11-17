@@ -5,7 +5,8 @@ import { chromium } from 'playwright-core';
 import { Store } from './store.js';
 import { sendTelegram, deliver } from './telegram.js';
 import { telegramTransport } from './telegram-proxy.js';
-import { unreadCount, openMessenger } from './avito.js';
+import { openMessenger } from './avito.js';
+import { freshNative, readNativeCount } from './native-source.js';
 import { recoverMessengerTab, retryDelay } from './recovery.js';
 import { observeNativeUnread } from './native-unread.js';
 
@@ -62,33 +63,44 @@ if (mode === 'telegram-test') {
       log('Complete login in the remote browser, then stop the login service. Profile is saved automatically.');
       while (!stopping) await sleep(1000, undefined, { signal: controller.signal }).catch(() => {});
     } else {
-      log('Monitor started: unread-chat counter mode (not individual messages)');
+      log('Monitor started: native unread responses only; no notifier RPC probes');
       log(`Chromium mode: ${monitorHeadless === 'true' ? 'headless' : 'graphical; remote display available'}`);
       let failures = 0;
       let recoveryNeeded = false;
       let failureStart = 0;
       let delay = seconds * 1000;
+      let handledRevision = 0;
       while (!stopping) {
         try {
           if (page.isClosed()) throw new Error('Browser page closed');
-          if (recoveryNeeded || new URL(page.url()).hash === '#block') {
+          const before = nativeUnread.snapshot();
+          let after = -1;
+          if (!freshNative(before, seconds * 1000) && (recoveryNeeded || before.kind === 'count')) {
+            after = before.revision;
             await recoverMessengerTab(page, { log });
             recoveryNeeded = false;
           }
-          const count = await unreadCount(page, { log, markProbe: nativeUnread.markProbe });
-          store.observe(count);
+          const sample = await readNativeCount(nativeUnread, {
+            maxAgeMs: seconds * 1000, after, signal: controller.signal
+          });
           if (store.get('unhealthy') === '1') {
             store.enqueue('✅ Проверка Авито снова работает.');
             store.set('unhealthy', '0');
           }
+          recoveryNeeded = false;
           failures = 0;
           failureStart = 0;
           delay = seconds * 1000;
-          await writeFile(join(data, 'health.json'), JSON.stringify({ lastSuccess: Date.now(), unreadChats: count }));
-          log(`Avito check OK; unread chats: ${count}`);
+          await writeFile(join(data, 'health.json'), JSON.stringify({ lastSuccess: sample.at, unreadChats: sample.count, source: 'native' }));
+          if (sample.revision !== handledRevision) {
+            log(`Native count accepted; unread chats: ${sample.count}; page availability not asserted`);
+            handledRevision = sample.revision;
+          }
+          delay = Math.max(1, seconds * 1000 - (Date.now() - sample.at));
         } catch (error) {
           if (stopping) break;
           if (page.isClosed()) throw new Error('Browser closed; restarting service is required');
+          if (error.status === undefined && await page.getByRole('heading', { name: 'Страница не загрузилась из-за проблем с IP', exact: true }).isVisible().catch(() => false)) error.status = 403;
           failures++;
           recoveryNeeded = true;
           failureStart ||= Date.now();
@@ -101,10 +113,12 @@ if (mode === 'telegram-test') {
           delay = retryDelay(error, failures, seconds * 1000);
 
         }
+        nativeUnread.consumeCounts(count => store.observe(count));
+        const waitRevision = nativeUnread.snapshot().revision;
         try { await deliver(store, send); }
         catch (error) { log(error.message); delay = Math.max(delay, (error.retryAfter || 0) * 1000); }
         if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will recover in the current tab before retry`);
-        await sleep(delay, undefined, { signal: controller.signal }).catch(() => {});
+        await nativeUnread.waitForUpdate(delay, waitRevision, { countsOnly: failures > 0, signal: controller.signal });
       }
     }
   } finally {
