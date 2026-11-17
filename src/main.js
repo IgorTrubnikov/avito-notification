@@ -6,7 +6,7 @@ import { Store } from './store.js';
 import { sendTelegram, deliver } from './telegram.js';
 import { telegramTransport } from './telegram-proxy.js';
 import { unreadCount, openMessenger } from './avito.js';
-import { freshMessengerTab, retryDelay } from './recovery.js';
+import { recoverMessengerTab, retryDelay } from './recovery.js';
 
 process.umask(0o077);
 const mode = process.argv[2] || 'monitor';
@@ -44,7 +44,7 @@ if (mode === 'telegram-test') {
       headless: mode !== 'login' && monitorHeadless === 'true', viewport: { width: 1280, height: 800 },
       args: ['--disable-dev-shm-usage'], timeout: 60000
     });
-    let page = context.pages()[0] || await context.newPage();
+    const page = context.pages()[0] || await context.newPage();
     for (const extra of context.pages().filter(p => p !== page)) await extra.close();
     context.setDefaultTimeout(25000);
     try {
@@ -67,10 +67,8 @@ if (mode === 'telegram-test') {
       while (!stopping) {
         try {
           if (page.isClosed()) throw new Error('Browser page closed');
-          if (recoveryNeeded) {
-            log('Replacing messenger tab before retry');
-            page = await freshMessengerTab(context, page);
-            await openMessenger(page, { log });
+          if (recoveryNeeded || new URL(page.url()).hash === '#block') {
+            await recoverMessengerTab(page, { log });
             recoveryNeeded = false;
           }
           const count = await unreadCount(page, { log });
@@ -101,7 +99,7 @@ if (mode === 'telegram-test') {
         }
         try { await deliver(store, send); }
         catch (error) { log(error.message); delay = Math.max(delay, (error.retryAfter || 0) * 1000); }
-        if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will open in a fresh tab before retry`);
+        if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will recover in the current tab before retry`);
         await sleep(delay, undefined, { signal: controller.signal }).catch(() => {});
       }
     }

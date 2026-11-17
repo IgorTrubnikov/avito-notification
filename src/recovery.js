@@ -1,14 +1,22 @@
-// Keep one authorised context; replace the tab and its page-local application state.
-export async function freshMessengerTab(context, previous) {
-  // Allocate an empty tab first so Chromium stays alive when its last old tab closes.
-  // The caller navigates to Messenger only after previous has closed.
-  const next = await context.newPage();
-  try {
-    if (!previous.isClosed()) await previous.close();
-    return next;
-  } catch (error) {
-    await next.close().catch(() => {});
-    throw error;
+import { MESSENGER, openMessenger } from './avito.js';
+
+export async function recoverMessengerTab(page, options = {}) {
+  const current = new URL(page.url());
+  const target = new URL(MESSENGER);
+  if (current.origin === target.origin && current.pathname === target.pathname && current.hash === '#block') {
+    options.log?.('Clearing #block in the current tab');
+    // Trigger the site's real hashchange navigation; replaceState would only
+    // change the address bar and would not notify its router.
+    await page.evaluate(() => { location.hash = ''; });
+    await page.waitForTimeout(1000);
+    await page.evaluate(() => {
+      if (location.hash === '' && location.href.endsWith('#')) {
+        history.replaceState(history.state, '', location.href.slice(0, -1));
+      }
+    });
+  } else {
+    options.log?.('Reopening messenger in the current tab');
+    await openMessenger(page, options);
   }
 }
 

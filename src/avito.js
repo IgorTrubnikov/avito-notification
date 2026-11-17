@@ -4,6 +4,11 @@ export async function unreadCount(page, { log = () => {} } = {}) {
   const current = new URL(page.url());
   if (current.origin !== 'https://www.avito.ru') throw new Error('Avito: unexpected page origin; check login');
   if (current.hash === '#block') log('Messenger URL contains #block; validating unread count instead of assuming failure');
+  if (await page.getByRole('heading', { name: 'Страница не загрузилась из-за проблем с IP', exact: true }).isVisible()) {
+    const error = new Error('Avito: visible IP error page; unread count is not trusted');
+    error.status = 403;
+    throw error;
+  }
   const result = await page.evaluate(async () => {
     const response = await fetch('/web/1/socket/fallback', {
       method: 'POST', credentials: 'same-origin',
