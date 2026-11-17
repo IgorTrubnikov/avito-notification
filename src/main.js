@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { Store } from './store.js';
 import { sendTelegram, deliver } from './telegram.js';
+import { telegramTransport } from './telegram-proxy.js';
 import { MESSENGER, unreadCount } from './avito.js';
 
 process.umask(0o077);
@@ -15,11 +16,14 @@ const seconds = Number(process.env.POLL_SECONDS || 30);
 if (!['monitor', 'login', 'telegram-test'].includes(mode)) throw new Error('Unknown command');
 if (mode !== 'login' && (!token || !chat)) throw new Error('Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env');
 if (!Number.isFinite(seconds) || seconds < 30 || seconds > 3600) throw new Error('POLL_SECONDS must be 30..3600');
-const send = text => sendTelegram(token, chat, text);
+const telegram = telegramTransport(mode === 'login' ? '' : (process.env.TELEGRAM_PROXY_URL || ''));
+const send = text => sendTelegram(token, chat, text, telegram.fetch);
 const log = text => console.log(`${new Date().toISOString()} ${text}`);
 if (mode === 'telegram-test') {
-  await send('✅ Проверка связи: сервер → Telegram работает.');
-  log('Telegram test delivered');
+  try {
+    await send('✅ Проверка связи: сервер → Telegram работает.');
+    log('Telegram test delivered');
+  } finally { await telegram.close(); }
 } else {
   await mkdir(data, { recursive: true, mode: 0o700 });
   const store = new Store(join(data, 'state.sqlite'));
@@ -93,5 +97,6 @@ if (mode === 'telegram-test') {
   } finally {
     await context?.close().catch(() => {});
     store.close();
+    await telegram.close();
   }
 }
