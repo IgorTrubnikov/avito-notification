@@ -20,3 +20,10 @@ export async function unreadCount(page) {
   if (result.error) throw new Error(`Avito: ${result.error}`);
   return result.count;
 }
+
+export async function openMessenger(page) {
+  // Open only the chat list, never an individual conversation. Loading the
+  // messenger lets the site's own scripts reinitialise its session/connections.
+  const response = await page.goto(MESSENGER, { waitUntil: 'load', timeout: 45000 });
+  if (response && !response.ok()) throw new Error(`Avito: messenger page HTTP ${response.status()}`);
+}

@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
 import { Store } from './store.js';
 import { sendTelegram, deliver } from './telegram.js';
 import { telegramTransport } from './telegram-proxy.js';
-import { MESSENGER, unreadCount } from './avito.js';
+import { unreadCount, openMessenger } from './avito.js';
 
 process.umask(0o077);
 const mode = process.argv[2] || 'monitor';
@@ -43,11 +43,9 @@ if (mode === 'telegram-test') {
     });
     const page = context.pages()[0] || await context.newPage();
     for (const extra of context.pages().filter(p => p !== page)) await extra.close();
-    // The RPC works from any Avito page in the extension; avoid opening a chat.
-    const startUrl = mode === 'login' ? MESSENGER : 'https://www.avito.ru/';
     page.setDefaultTimeout(25000);
     try {
-      await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await openMessenger(page);
     } catch (error) {
       log(mode === 'login'
         ? 'Initial navigation failed. Use the remote browser to check network and open Avito manually.'
@@ -59,11 +57,17 @@ if (mode === 'telegram-test') {
     } else {
       log('Monitor started: unread-chat counter mode (not individual messages)');
       let failures = 0;
+      let recoveryNeeded = false;
       let failureStart = 0;
       let delay = seconds * 1000;
       while (!stopping) {
         try {
           if (page.isClosed()) throw new Error('Browser page closed');
+          if (recoveryNeeded) {
+            log('Reloading messenger before retry');
+            await openMessenger(page);
+            recoveryNeeded = false;
+          }
           const count = await unreadCount(page);
           store.observe(count);
           if (store.get('unhealthy') === '1') {
@@ -79,6 +83,7 @@ if (mode === 'telegram-test') {
           if (stopping) break;
           if (page.isClosed()) throw new Error('Browser closed; restarting service is required');
           failures++;
+          recoveryNeeded = true;
           failureStart ||= Date.now();
           log(error.message.startsWith('Avito:') ? error.message : 'Avito check failed; browser/network unavailable');
           // Temporary network errors should not spam Telegram or trigger login claims.
@@ -87,10 +92,11 @@ if (mode === 'telegram-test') {
             store.set('unhealthy', '1');
           }
           delay = Math.min(300000, seconds * 1000 * 2 ** Math.min(failures, 4));
-          if (failures >= 3) await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+
         }
         try { await deliver(store, send); }
         catch (error) { log(error.message); delay = Math.max(delay, (error.retryAfter || 0) * 1000); }
+        if (failures) log(`Next Avito check in ${Math.ceil(delay / 1000)}s; messenger will reload before retry`);
         await sleep(delay, undefined, { signal: controller.signal }).catch(() => {});
       }
     }
