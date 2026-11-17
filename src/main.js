@@ -71,7 +71,7 @@ if (mode === 'telegram-test') {
             await openMessenger(page, { log });
             recoveryNeeded = false;
           }
-          const count = await unreadCount(page);
+          const count = await unreadCount(page, { log });
           store.observe(count);
           if (store.get('unhealthy') === '1') {
             store.enqueue('✅ Проверка Авито снова работает.');

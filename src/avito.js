@@ -1,9 +1,9 @@
 export const MESSENGER = 'https://www.avito.ru/profile/messenger';
 
-export async function unreadCount(page) {
+export async function unreadCount(page, { log = () => {} } = {}) {
   const current = new URL(page.url());
-  if (current.hash === '#block') throw new Error('Avito: messenger shows #block; waiting before reopening');
   if (current.origin !== 'https://www.avito.ru') throw new Error('Avito: unexpected page origin; check login');
+  if (current.hash === '#block') log('Messenger URL contains #block; validating unread count instead of assuming failure');
   const result = await page.evaluate(async () => {
     const response = await fetch('/web/1/socket/fallback', {
       method: 'POST', credentials: 'same-origin',

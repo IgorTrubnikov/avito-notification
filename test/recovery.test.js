@@ -48,26 +48,33 @@ test('reopening messenger recovers a failed RPC without losing notification base
 });
 
 
-test('#block is detected without polling and canonical navigation clears the fragment', async () => {
+test('stale #block does not hide valid RPC or suppress actual RPC errors', async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium' });
   try {
     const page = await browser.newPage();
     let rpcRequests = 0;
+    let rpcFailure = false;
     await page.route('https://www.avito.ru/**', async route => {
       if (route.request().url().includes('/socket/fallback')) {
         rpcRequests++;
-        await route.fulfill({ json: { result: { unreadChats: 0 } } });
+        await route.fulfill(rpcFailure ? { status: 403, body: 'Forbidden' } : { json: { result: { unreadChats: 0 } } });
       } else await route.fulfill({ contentType: 'text/html', body: '<html>Messenger</html>' });
     });
     await openMessenger(page);
     await page.evaluate(() => { location.hash = 'block'; });
     await page.waitForURL(url => url.hash === '#block');
-    await assert.rejects(unreadCount(page), /messenger shows #block/);
-    assert.equal(rpcRequests, 0);
+    const logs = [];
+    assert.equal(await unreadCount(page, { log: text => logs.push(text) }), 0);
+    assert.match(logs[0], /validating unread count/);
+    assert.equal(rpcRequests, 1);
+    rpcFailure = true;
+    await assert.rejects(unreadCount(page), /HTTP 403/);
+    assert.equal(rpcRequests, 2);
+    rpcFailure = false;
     await openMessenger(page);
     assert.equal(page.url(), MESSENGER);
     assert.equal(await unreadCount(page), 0);
-    assert.equal(rpcRequests, 1);
+    assert.equal(rpcRequests, 3);
   } finally { await browser.close(); }
 });
 
@@ -85,9 +92,9 @@ test('403 document can finish a client-side transition before the RPC check', as
     assert.equal(await openMessenger(page), 403);
     assert.equal(new URL(page.url()).hash, '');
     assert.equal(await unreadCount(page), 2);
-    // Persistent block routes must still fail, even when the document loaded.
+    // A stale fragment is also harmless after a 403 document if RPC succeeds.
     await page.evaluate(() => { location.hash = 'block'; });
     await page.waitForURL(url => url.hash === '#block');
-    await assert.rejects(unreadCount(page), /messenger shows #block/);
+    assert.equal(await unreadCount(page), 2);
   } finally { await browser.close(); }
 });
