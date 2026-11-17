@@ -20,7 +20,7 @@ function fixture() {
   writeFileSync(script, readFileSync(new URL('../scripts/entrypoint.sh', import.meta.url), 'utf8').replaceAll('/data', dir));
   return {
     dir,
-    run: () => spawnSync('sh', [script, 'monitor'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}/bin:${process.env.PATH}` } }),
+    run: () => spawnSync('sh', [script, 'monitor'], { encoding: 'utf8', env: { ...process.env, MONITOR_HEADLESS: 'true', PATH: `${dir}/bin:${process.env.PATH}` } }),
     clean: () => rmSync(dir, { recursive: true, force: true })
   };
 }

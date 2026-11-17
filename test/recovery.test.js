@@ -35,3 +35,27 @@ test('reopening messenger recovers a failed RPC without losing notification base
     await assert.rejects(openMessenger(page), /messenger page HTTP 403/);
   } finally { store.close(); await browser.close(); }
 });
+
+
+test('#block is detected without polling and canonical navigation clears the fragment', async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium' });
+  try {
+    const page = await browser.newPage();
+    let rpcRequests = 0;
+    await page.route('https://www.avito.ru/**', async route => {
+      if (route.request().url().includes('/socket/fallback')) {
+        rpcRequests++;
+        await route.fulfill({ json: { result: { unreadChats: 0 } } });
+      } else await route.fulfill({ contentType: 'text/html', body: '<html>Messenger</html>' });
+    });
+    await openMessenger(page);
+    await page.evaluate(() => { location.hash = 'block'; });
+    await page.waitForURL(url => url.hash === '#block');
+    await assert.rejects(unreadCount(page), /messenger shows #block/);
+    assert.equal(rpcRequests, 0);
+    await openMessenger(page);
+    assert.equal(page.url(), MESSENGER);
+    assert.equal(await unreadCount(page), 0);
+    assert.equal(rpcRequests, 1);
+  } finally { await browser.close(); }
+});

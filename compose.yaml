@@ -18,6 +18,8 @@ services:
     <<: *common
     command: monitor
     profiles: [monitor]
+    ports:
+      - '127.0.0.1:6080:6080'
     restart: unless-stopped
   login:
     <<: *common

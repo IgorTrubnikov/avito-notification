@@ -13,6 +13,8 @@ const data = process.env.DATA_DIR || '/data';
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const chat = process.env.TELEGRAM_CHAT_ID;
 const seconds = Number(process.env.POLL_SECONDS || 30);
+const monitorHeadless = process.env.MONITOR_HEADLESS || 'true';
+if (!['true', 'false'].includes(monitorHeadless)) throw new Error('MONITOR_HEADLESS must be true or false');
 if (!['monitor', 'login', 'telegram-test'].includes(mode)) throw new Error('Unknown command');
 if (mode !== 'login' && (!token || !chat)) throw new Error('Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env');
 if (!Number.isFinite(seconds) || seconds < 30 || seconds > 3600) throw new Error('POLL_SECONDS must be 30..3600');
@@ -38,7 +40,7 @@ if (mode === 'telegram-test') {
   try {
     context = await chromium.launchPersistentContext(join(data, 'profile'), {
       executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
-      headless: mode !== 'login', viewport: { width: 1280, height: 800 },
+      headless: mode !== 'login' && monitorHeadless === 'true', viewport: { width: 1280, height: 800 },
       args: ['--disable-dev-shm-usage'], timeout: 60000
     });
     const page = context.pages()[0] || await context.newPage();
@@ -56,6 +58,7 @@ if (mode === 'telegram-test') {
       while (!stopping) await sleep(1000, undefined, { signal: controller.signal }).catch(() => {});
     } else {
       log('Monitor started: unread-chat counter mode (not individual messages)');
+      log(`Chromium mode: ${monitorHeadless === 'true' ? 'headless' : 'graphical; remote display available'}`);
       let failures = 0;
       let recoveryNeeded = false;
       let failureStart = 0;

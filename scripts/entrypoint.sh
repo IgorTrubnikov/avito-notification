@@ -19,7 +19,13 @@ case "${1:-monitor}" in
     done
     ;;
 esac
+with_display=false
 if [ "${1:-}" = login ]; then
+  with_display=true
+elif [ "${1:-monitor}" = monitor ] && [ "${MONITOR_HEADLESS:-true}" = false ]; then
+  with_display=true
+fi
+if [ "$with_display" = true ]; then
   export DISPLAY=:99
   Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
   attempts=0
