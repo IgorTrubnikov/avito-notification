@@ -7,6 +7,7 @@ import { sendTelegram, deliver } from './telegram.js';
 import { telegramTransport } from './telegram-proxy.js';
 import { unreadCount, openMessenger } from './avito.js';
 import { recoverMessengerTab, retryDelay } from './recovery.js';
+import { observeNativeUnread } from './native-unread.js';
 
 process.umask(0o077);
 const mode = process.argv[2] || 'monitor';
@@ -32,6 +33,7 @@ if (mode === 'telegram-test') {
   const store = new Store(join(data, 'state.sqlite'));
   let stopping = false;
   let context;
+  let nativeUnread;
   const controller = new AbortController();
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
     stopping = true;
@@ -47,6 +49,8 @@ if (mode === 'telegram-test') {
     const page = context.pages()[0] || await context.newPage();
     for (const extra of context.pages().filter(p => p !== page)) await extra.close();
     context.setDefaultTimeout(25000);
+    nativeUnread = observeNativeUnread(page, { log });
+    log('Native unread HTTP RPC observation enabled');
     try {
       await openMessenger(page, { log });
     } catch (error) {
@@ -71,7 +75,7 @@ if (mode === 'telegram-test') {
             await recoverMessengerTab(page, { log });
             recoveryNeeded = false;
           }
-          const count = await unreadCount(page, { log });
+          const count = await unreadCount(page, { log, markProbe: nativeUnread.markProbe });
           store.observe(count);
           if (store.get('unhealthy') === '1') {
             store.enqueue('✅ Проверка Авито снова работает.');
@@ -104,6 +108,7 @@ if (mode === 'telegram-test') {
       }
     }
   } finally {
+    nativeUnread?.dispose();
     await context?.close().catch(() => {});
     store.close();
     await telegram.close();

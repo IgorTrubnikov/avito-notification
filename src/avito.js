@@ -1,6 +1,6 @@
 export const MESSENGER = 'https://www.avito.ru/profile/messenger';
 
-export async function unreadCount(page, { log = () => {} } = {}) {
+export async function unreadCount(page, { log = () => {}, markProbe = () => {} } = {}) {
   const current = new URL(page.url());
   if (current.origin !== 'https://www.avito.ru') throw new Error('Avito: unexpected page origin; check login');
   if (current.hash === '#block') log('Messenger URL contains #block; validating unread count instead of assuming failure');
@@ -9,11 +9,13 @@ export async function unreadCount(page, { log = () => {} } = {}) {
     error.status = 403;
     throw error;
   }
-  const result = await page.evaluate(async () => {
+  const probeId = Date.now();
+  markProbe(probeId);
+  const result = await page.evaluate(async rpcId => {
     const response = await fetch('/web/1/socket/fallback', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'messenger.getUnreadCount.v1', params: {} }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: rpcId, method: 'messenger.getUnreadCount.v1', params: {} }),
       signal: AbortSignal.timeout(20000)
     });
     // Never return response bodies to logs: they may contain private messages.
@@ -23,7 +25,7 @@ export async function unreadCount(page, { log = () => {} } = {}) {
     const items = Array.isArray(parsed) ? parsed : [parsed];
     const item = items.find(x => Number.isSafeInteger(x?.result?.unreadChats) && x.result.unreadChats >= 0);
     return item ? { count: item.result.unreadChats } : { error: 'unreadChats missing; check login or protocol change' };
-  });
+  }, probeId);
   if (result.error) {
     const error = new Error(`Avito: ${result.error}`);
     error.status = result.status;
