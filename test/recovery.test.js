@@ -12,12 +12,13 @@ test('reopening messenger recovers a failed RPC without losing notification base
     const page = await browser.newPage();
     let navigations = 0;
     let pageStatus = 200;
+    let rpcFailure = false;
     await page.route('https://www.avito.ru/**', async route => {
       if (route.request().url() === MESSENGER) {
         navigations++;
         await route.fulfill({ status: pageStatus, contentType: 'text/html', body: '<html>Messenger</html>' });
       } else if (route.request().url().includes('/socket/fallback')) {
-        await route.fulfill(navigations < 2 ? { status: 403, body: 'Forbidden' } : { json: { result: { unreadChats: 1 } } });
+        await route.fulfill(navigations < 2 || rpcFailure ? { status: 403, body: 'Forbidden' } : { json: { result: { unreadChats: 1 } } });
       } else await route.abort();
     });
     store.observe(0);
@@ -32,7 +33,17 @@ test('reopening messenger recovers a failed RPC without losing notification base
     assert.equal(sent.length, 1);
     assert.match(sent[0], /0 → 1/);
     pageStatus = 403;
-    await assert.rejects(openMessenger(page), /messenger page HTTP 403/);
+    const logs = [];
+    assert.equal(await openMessenger(page, { log: text => logs.push(text) }), 403);
+    assert.match(logs[0], /waiting 5s/);
+    // A 403 document must not prevent a valid RPC from being checked.
+    assert.equal(await unreadCount(page), 1);
+    rpcFailure = true;
+    await assert.rejects(unreadCount(page), /HTTP 403/);
+    assert.equal(store.get('unread'), '1');
+    assert.equal(store.pending().length, 0);
+    pageStatus = 500;
+    await assert.rejects(openMessenger(page), /messenger page HTTP 500/);
   } finally { store.close(); await browser.close(); }
 });
 
@@ -57,5 +68,26 @@ test('#block is detected without polling and canonical navigation clears the fra
     assert.equal(page.url(), MESSENGER);
     assert.equal(await unreadCount(page), 0);
     assert.equal(rpcRequests, 1);
+  } finally { await browser.close(); }
+});
+
+
+test('403 document can finish a client-side transition before the RPC check', async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium' });
+  try {
+    const page = await browser.newPage();
+    await page.route('https://www.avito.ru/**', route => route.request().url().includes('/socket/fallback')
+      ? route.fulfill({ json: { result: { unreadChats: 2 } } })
+      : route.fulfill({ status: 403, contentType: 'text/html', body: `<script>
+          location.hash = 'block';
+          setTimeout(() => { location.hash = ''; document.body.textContent = 'Messages'; }, 100);
+        </script>` }));
+    assert.equal(await openMessenger(page), 403);
+    assert.equal(new URL(page.url()).hash, '');
+    assert.equal(await unreadCount(page), 2);
+    // Persistent block routes must still fail, even when the document loaded.
+    await page.evaluate(() => { location.hash = 'block'; });
+    await page.waitForURL(url => url.hash === '#block');
+    await assert.rejects(unreadCount(page), /messenger shows #block/);
   } finally { await browser.close(); }
 });

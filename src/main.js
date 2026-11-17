@@ -47,7 +47,7 @@ if (mode === 'telegram-test') {
     for (const extra of context.pages().filter(p => p !== page)) await extra.close();
     page.setDefaultTimeout(25000);
     try {
-      await openMessenger(page);
+      await openMessenger(page, { log });
     } catch (error) {
       log(mode === 'login'
         ? 'Initial navigation failed. Use the remote browser to check network and open Avito manually.'
@@ -68,7 +68,7 @@ if (mode === 'telegram-test') {
           if (page.isClosed()) throw new Error('Browser page closed');
           if (recoveryNeeded) {
             log('Reloading messenger before retry');
-            await openMessenger(page);
+            await openMessenger(page, { log });
             recoveryNeeded = false;
           }
           const count = await unreadCount(page);

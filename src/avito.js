@@ -23,9 +23,18 @@ export async function unreadCount(page) {
   return result.count;
 }
 
-export async function openMessenger(page) {
+export async function openMessenger(page, { log = () => {} } = {}) {
   // Open only the chat list, never an individual conversation. Loading the
   // messenger lets the site's own scripts reinitialise its session/connections.
   const response = await page.goto(MESSENGER, { waitUntil: 'load', timeout: 45000 });
-  if (response && !response.ok()) throw new Error(`Avito: messenger page HTTP ${response.status()}`);
+  const status = response?.status() ?? null;
+  if (status === 403) {
+    // The document may contain working application scripts despite its status.
+    // Navigation alone never establishes health: the caller must validate RPC.
+    log('Messenger navigation HTTP 403; waiting 5s for page scripts before checking unread count');
+    await page.waitForTimeout(5000);
+  } else if (response && !response.ok()) {
+    throw new Error(`Avito: messenger page HTTP ${status}`);
+  }
+  return status;
 }
