@@ -1,0 +1,14 @@
+{
+  "name": "avito-notification",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/main.js",
+    "login": "node src/main.js login",
+    "test": "node --test",
+    "telegram:test": "node src/main.js telegram-test"
+  },
+  "dependencies": { "playwright-core": "1.65.1" }
+}

@@ -1,0 +1,30 @@
+x-common: &common
+  build: .
+  env_file: .env
+  volumes:
+    - avito-data:/data
+  mem_limit: 1100m
+  cpus: 0.75
+  pids_limit: 256
+  shm_size: 256mb
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 5m
+      max-file: '2'
+services:
+  bot:
+    <<: *common
+    command: monitor
+    profiles: [monitor]
+    restart: unless-stopped
+  login:
+    <<: *common
+    command: login
+    profiles: [login]
+    ports:
+      - '127.0.0.1:6080:6080'
+    restart: 'no'
+volumes:
+  avito-data:
